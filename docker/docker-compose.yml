@@ -1,0 +1,35 @@
+version: '3'
+
+services:
+  raft_1:
+    image: axdx/raft:0.1
+    command:
+      [
+        "start",
+        "--debug",
+        "--nodes=http://raft_2:31337,http://raft_3:31337,http://raft_4:31337,\
+          http://raft_5:31337"
+      ]
+  raft_2:
+    image: axdx/raft:0.1
+    command:
+      [
+        "start",
+        "--debug",
+        "--nodes=http://raft_1:31337,http://raft_3:31337,http://raft_4:31337,\
+          http://raft_5:31337"
+      ]
+  raft_3:
+    image: axdx/raft:0.1
+    command:
+      [
+        "start",
+        "--nodes=http://raft_2:31337,http://raft_1:31337,http://raft_4:31337,\
+          http://raft_5:31337"
+      ]
+  # raft_4:
+  #   image: axdx/raft:0.1
+  #   command: ["start", "--nodes=http://raft_2:31337,http://raft_3:31337,http://raft_1:31337,http://raft_5:31337"]
+  # raft_5:
+  #   image: axdx/raft:0.1
+  #   command: ["start", "--nodes=http://raft_2:31337,http://raft_3:31337,http://raft_4:31337,http://raft_1:31337"]
