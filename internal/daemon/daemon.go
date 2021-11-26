@@ -1,43 +1,72 @@
 package daemon
 
 import (
+	"fmt"
 	"log"
 	"math/rand"
+	"net/url"
 	"time"
+
+	"gitlab.com/axdx/raft-sandbox/internal/logging"
 )
 
 const (
-	TermLengthMin int64 = 150
-	TermLengthMax int64 = 500
+	ElectionLengthMin int64 = 150
+	ElectionLengthMax int64 = 300
+	TermLengthMin     int64 = 150
+	TermLengthMax     int64 = 500
 )
 
 var rnd = rand.New(rand.NewSource(time.Now().UnixNano()))
 
-type Daemon struct {
+type Node struct {
+	hostname string
+	port     string
+	nodes    []*url.URL
+
 	stop  chan struct{}
 	timer *time.Timer
 	term  int
 }
 
-func New() *Daemon {
-	return &Daemon{
+func New(opts ...NodeOpt) (*Node, error) {
+	node := &Node{
 		stop: make(chan struct{}),
 	}
+
+	for _, fn := range opts {
+		if err := fn(node); err != nil {
+			return nil, err
+		}
+	}
+
+	return node, nil
 }
 
-func (d *Daemon) Stop() {
+func (d *Node) Stop() {
 	log.Println("Stopping daemon...")
 	d.stop <- struct{}{}
 }
 
-func (d *Daemon) NewTerm() {
-	duration := time.Duration(rnd.Int63n(TermLengthMax-TermLengthMin)+TermLengthMin) * time.Millisecond
-	log.Printf("Starting term %d, duration: %s", d.term, duration)
-	d.timer = time.NewTimer(duration)
+func (d *Node) NewTerm() {
+	// electionDuration := time.Duration(rnd.Int63n(ElectionLengthMax-ElectionLengthMin)+ElectionLengthMin) * time.Millisecond
+	// logging.GetLogger().Log(fmt.Sprintf("Starting election, timeout: %s", electionDuration))
+
+	// ctx, cancel := context.WithTimeout(context.Background(), electionDuration)
+	// d.Election(ctx)
+
+	termDuration := time.Duration(rnd.Int63n(TermLengthMax-TermLengthMin)+TermLengthMin) * time.Millisecond
+
+	logging.GetLogger().Log(fmt.Sprintf("Starting term %d, duration: %s", d.term, termDuration))
+	d.timer = time.NewTimer(termDuration)
 	d.term += 1
 }
 
-func (d *Daemon) Loop() {
+// func (d *Daemon) Election(ctx context.Context) {
+
+// }
+
+func (d *Node) Loop() {
 	log.Println("Starting daemon...")
 	d.NewTerm()
 	running := true
