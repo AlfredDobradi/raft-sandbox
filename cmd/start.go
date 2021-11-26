@@ -27,7 +27,9 @@ func (c *StartCmd) Run(ctx *Context) error {
 	d, err := daemon.New(
 		daemon.WithHostname(c.Hostname),
 		daemon.WithPort(c.Port),
-		daemon.WithNodeList(c.Nodes))
+		daemon.WithNodeList(c.Nodes),
+		daemon.WithNodeID(c.NodeID),
+	)
 	if err != nil {
 		log.Panicf("error creating daemon: %v", err)
 	}

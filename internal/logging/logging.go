@@ -2,24 +2,15 @@ package logging
 
 import (
 	"log"
-
-	"gitlab.com/axdx/raft-sandbox/internal/config"
+	"os"
 )
 
-var logger *Logger
+var logger *log.Logger
 
-func GetLogger() *Logger {
+func GetLogger() *log.Logger {
 	if logger == nil {
-		logger = &Logger{}
+		logger = log.New(os.Stdout, "", log.LstdFlags|log.Lmicroseconds)
 	}
 
 	return logger
-}
-
-type Logger struct{}
-
-func (l *Logger) Log(str string) {
-	if config.Debug() {
-		log.Println(str)
-	}
 }

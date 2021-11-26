@@ -49,3 +49,10 @@ func WithNodeList(potentialNodes []string) NodeOpt {
 		return nil
 	}
 }
+
+func WithNodeID(id string) NodeOpt {
+	return func(n *Node) error {
+		n.id = id
+		return nil
+	}
+}

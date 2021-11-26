@@ -1,14 +1,16 @@
 package daemon
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io/ioutil"
-	"log"
 	"math/rand"
 	"net/http"
 	"net/url"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"gitlab.com/axdx/raft-sandbox/internal/logging"
@@ -23,34 +25,38 @@ const (
 )
 
 const (
-	ElectionLengthMin int64 = 150
-	ElectionLengthMax int64 = 300
+	HeartbeatTimer int64 = 300
 	// TermLengthMin     int64 = 150
 	// TermLengthMax     int64 = 500
-	TermLengthMin int64 = 3000
-	TermLengthMax int64 = 6000
+	TermLengthMin int64 = 7000
+	TermLengthMax int64 = 10000
 )
 
 var rnd = rand.New(rand.NewSource(time.Now().UnixNano()))
+var ErrVoteNotGranted error = fmt.Errorf("vote not granted")
+var ErrAlreadyVoted error = fmt.Errorf("already voted")
 
 type Node struct {
+	id       string
 	hostname string
 	port     string
 	nodes    []*url.URL
 	listener *http.Server
 
-	state  NodeState
-	errors chan error
-	stop   chan struct{}
-	timer  *time.Timer
-	term   int
-	voted  bool
-	votes  int
+	heartbeat       bool
+	state           NodeState
+	errors          chan error
+	stop            chan struct{}
+	heartbeatTicker *time.Ticker
+	termTimer       *time.Timer
+	term            int
+	votedFor        string
 }
 
 func New(opts ...NodeOpt) (*Node, error) {
 	node := &Node{
-		stop: make(chan struct{}),
+		stop:            make(chan struct{}),
+		heartbeatTicker: time.NewTicker(time.Duration(HeartbeatTimer) * time.Millisecond),
 	}
 
 	for _, fn := range opts {
@@ -63,10 +69,10 @@ func New(opts ...NodeOpt) (*Node, error) {
 }
 
 func (n *Node) Stop() {
-	log.Println("Stopping daemon...")
+	logging.GetLogger().Println("Stopping daemon...")
 	if n.listener != nil {
 		if err := n.listener.Shutdown(context.Background()); err != nil {
-			log.Printf("ERROR: %v", err)
+			logging.GetLogger().Printf("ERROR: %v", err)
 		} // todo add timeout
 	}
 	n.stop <- struct{}{}
@@ -75,80 +81,139 @@ func (n *Node) Stop() {
 func (n *Node) NewTerm() {
 	termDuration := time.Duration(rnd.Int63n(TermLengthMax-TermLengthMin)+TermLengthMin) * time.Millisecond
 
-	logging.GetLogger().Log(fmt.Sprintf("Starting term %d, duration: %s", n.term, termDuration))
-	n.timer = time.NewTimer(termDuration)
-	n.voted = false
-	n.term += 1
+	logging.GetLogger().Printf("Starting term %d, duration: %s", n.term, termDuration)
+	n.termTimer = time.NewTimer(termDuration)
+	if !n.heartbeat && n.votedFor == "" {
+		n.term += 1
 
-	electionDuration := time.Duration(rnd.Int63n(ElectionLengthMax-ElectionLengthMin)+ElectionLengthMin) * time.Millisecond
-	// logging.GetLogger().Log(fmt.Sprintf("Starting election, timeout: %s", electionDuration))
-
-	ctx, cancel := context.WithTimeout(context.Background(), electionDuration)
-	defer cancel()
-	log.Printf("ELECTION: Starting election with %s timeout", electionDuration)
-	n.Election(ctx)
+		n.Election()
+	}
 }
 
-func (n *Node) Election(ctx context.Context) {
-	n.votes = 0
-	n.state = Candidate
+func (n *Node) Election() {
+	n.setState(Candidate)
+	n.votedFor = ""
+	var votes int64 = 1
+
 	wg := &sync.WaitGroup{}
 	for _, node := range n.nodes {
 		wg.Add(1)
 		go func(node *url.URL) {
 			defer wg.Done()
 			nodeHost := fmt.Sprintf("%s:%s", node.Hostname(), node.Port())
-			log.Printf("ELECTION: Asking %s for vote", nodeHost)
-			r, err := http.Get(fmt.Sprintf("http://%s/RequestVote", nodeHost))
-			if err != nil {
-				log.Printf("ELECTION: [%s] Error sending vote request: %v", nodeHost, err)
-				return
-			}
-			body, err := ioutil.ReadAll(r.Body)
-			if err != nil {
-				if r.StatusCode == http.StatusOK {
-					n.votes += 1
-					log.Printf("ELECTION: [%s] We received the vote, but can't read body: %v", nodeHost, err)
-				} else {
-					log.Printf("ELECTION: [%s] Getting vote failed, but can't read body: %v", nodeHost, err)
-				}
-				return
-			}
-			if r.StatusCode != http.StatusOK {
-				log.Printf("ELECTION: [%s] Error receiving vote: %s", nodeHost, body)
+			if err := n.RequestVote(nodeHost); err != nil {
+				logging.GetLogger().Printf("ELECTION: [%s] Error getting vote: %v", nodeHost, err)
 				return
 			}
 
-			log.Printf("ELECTION: [%s] Got vote: %s", nodeHost, body)
-			n.votes += 1
+			logging.GetLogger().Printf("ELECTION: [%s] Received vote", nodeHost)
+			atomic.AddInt64(&votes, 1)
 		}(node)
 	}
 	wg.Wait()
-	log.Printf("Term: %d, Votes: %d", n.term, n.votes)
+	logging.GetLogger().Printf("Term: %d, Votes: %d", n.term, votes)
+
+	if votes > int64(len(n.nodes)/2) {
+		n.setState(Leader)
+		n.Heartbeat()
+	} else {
+		n.setState(Follower)
+	}
+}
+
+func (n *Node) RequestVote(host string) error {
+	request := RequestVoteRequest{
+		Term:        n.term,
+		CandidateID: n.id,
+	}
+	logging.GetLogger().Printf("ELECTION: Asking %s for vote", host)
+
+	payload, err := json.Marshal(request)
+	if err != nil {
+		return fmt.Errorf("marshal: %w", err)
+	}
+
+	body := bytes.NewReader(payload)
+	r, err := http.Post(fmt.Sprintf("http://%s/RequestVote", host), "application/json", body)
+	if err != nil {
+		return fmt.Errorf("post: %w", err)
+	}
+
+	responseBody, err := ioutil.ReadAll(r.Body)
+	if err != nil {
+		return fmt.Errorf("body: %v", err)
+	}
+
+	var response RequestVoteResponse
+	if err := json.Unmarshal(responseBody, &response); err != nil {
+		return fmt.Errorf("unmarshal: %v", err)
+	}
+
+	if !response.VoteGranted {
+		return ErrVoteNotGranted
+	}
+
+	return nil
 }
 
 func (n *Node) Loop() {
-	log.Println("Starting daemon...")
+	logging.GetLogger().Println("Starting daemon...")
 	go n.Listen()
 	n.NewTerm()
 	running := true
 	for running {
 		select { // nolint
 		case err := <-n.errors:
-			log.Printf("ERROR: %v", err)
-		case <-n.timer.C:
+			logging.GetLogger().Printf("ERROR: %v", err)
+		case <-n.termTimer.C:
 			n.NewTerm()
+		case <-n.heartbeatTicker.C:
+			n.Heartbeat()
 		case <-n.stop:
 			running = false
 		}
 	}
 }
 
-func (n *Node) Vote() error {
-	if n.voted {
-		return fmt.Errorf("already voted")
+func (n *Node) Heartbeat() {
+	if n.state == Leader {
+		wg := &sync.WaitGroup{}
+		for _, node := range n.nodes {
+			wg.Add(1)
+			go func(node *url.URL) {
+				defer wg.Done()
+
+				nodeHost := fmt.Sprintf("%s:%s", node.Hostname(), node.Port())
+				_, err := http.Post(fmt.Sprintf("http://%s/AppendEntry", nodeHost), "application/json", nil)
+				if err != nil {
+					logging.GetLogger().Printf("HEARTBEAT: [%s] Error sending heartbeat: %v", nodeHost, err)
+				} else {
+					logging.GetLogger().Printf("HEARTBEAT: [%s] Heartbeat sent", nodeHost)
+				}
+			}(node)
+		}
+		wg.Wait()
+	}
+}
+
+func (n *Node) Vote(nodeID string) error {
+	if n.votedFor != "" || n.state != Follower {
+		return ErrAlreadyVoted
 	}
 
-	n.voted = true
+	n.votedFor = nodeID
 	return nil
+}
+
+func (n *Node) HandleHeartbeat() {
+	logging.GetLogger().Printf("HEARTBEAT: Received")
+	n.heartbeat = true
+	n.setState(Follower)
+}
+
+func (n *Node) setState(state NodeState) {
+	if n.state != state {
+		logging.GetLogger().Printf("New state: %s", state)
+		n.state = state
+	}
 }
