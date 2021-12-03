@@ -34,7 +34,11 @@ const (
 )
 
 var rnd = rand.New(rand.NewSource(time.Now().UnixNano()))
+
+// TODO Create error types
 var ErrVoteNotGranted error = fmt.Errorf("vote not granted")
+var ErrTermOutdated error = fmt.Errorf("term is out of date")
+var ErrLeaderCantVote error = fmt.Errorf("leader requested to vote")
 var ErrAlreadyVoted error = fmt.Errorf("already voted")
 
 type Node struct {
@@ -50,7 +54,7 @@ type Node struct {
 	stop            chan struct{}
 	heartbeatTicker *time.Ticker
 	termTimer       *time.Timer
-	term            int
+	currentTerm     int
 	votedFor        string
 }
 
@@ -92,10 +96,10 @@ func (n *Node) Stop() {
 func (n *Node) NewTerm() {
 	termDuration := time.Duration(rnd.Int63n(TermLengthMax-TermLengthMin)+TermLengthMin) * time.Millisecond
 
-	logging.GetLogger().Printf("Starting term %d, duration: %s", n.term, termDuration)
+	logging.GetLogger().Printf("Starting term %d, duration: %s", n.currentTerm, termDuration)
 	n.termTimer = time.NewTimer(termDuration)
 	if !n.heartbeat && n.votedFor == "" {
-		n.term += 1
+		n.currentTerm += 1
 
 		n.Election()
 	}
@@ -103,7 +107,7 @@ func (n *Node) NewTerm() {
 
 func (n *Node) Election() {
 	n.setState(Candidate)
-	n.votedFor = ""
+	n.votedFor = n.id
 	var votes int64 = 1
 
 	wg := &sync.WaitGroup{}
@@ -124,7 +128,7 @@ func (n *Node) Election() {
 		}(&n.registry[i])
 	}
 	wg.Wait()
-	logging.GetLogger().Printf("ELECTION: Term: %d, Votes: %d", n.term, votes)
+	logging.GetLogger().Printf("ELECTION: Term: %d, Votes: %d", n.currentTerm, votes)
 
 	if votes > int64(len(n.registry)/2) {
 		n.setState(Leader)
@@ -136,7 +140,7 @@ func (n *Node) Election() {
 
 func (n *Node) RequestVote(host string) error {
 	request := RequestVoteRequest{
-		Term:        n.term,
+		Term:        n.currentTerm,
 		CandidateID: n.id,
 	}
 	logging.GetLogger().Printf("ELECTION: Asking %s for vote", host)
@@ -203,12 +207,25 @@ func (n *Node) Heartbeat() {
 	}
 }
 
-func (n *Node) Vote(nodeID string) error {
-	if n.votedFor != "" || n.state != Follower {
-		return ErrAlreadyVoted
+func (n *Node) Vote(request *RequestVoteRequest) error {
+	switch n.state {
+	case Follower:
+		if n.votedFor != "" {
+			return ErrAlreadyVoted
+		}
+	case Candidate:
+		if n.votedFor != "" && n.votedFor != n.id {
+			return ErrAlreadyVoted
+		}
+	case Leader:
+		return ErrLeaderCantVote
 	}
 
-	n.votedFor = nodeID
+	if request.Term < n.currentTerm {
+		return ErrTermOutdated
+	}
+
+	n.votedFor = request.CandidateID
 	return nil
 }
 
@@ -224,7 +241,7 @@ func (n *Node) sendHeartbeat(node *Connection, wg *sync.WaitGroup) {
 	nodeHost := fmt.Sprintf("%s:%s", node.url.Hostname(), node.url.Port())
 
 	request := &AppendEntryRequest{
-		Term:     n.term,
+		Term:     n.currentTerm,
 		LeaderID: n.id,
 	}
 

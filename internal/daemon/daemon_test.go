@@ -3,6 +3,7 @@ package daemon
 import (
 	"context"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"net/url"
@@ -14,17 +15,23 @@ import (
 	"gitlab.com/axdx/raft-sandbox/internal/logging"
 )
 
-type MockNode struct {
-	mu      sync.Mutex
-	Success bool
-	Calls   map[string]int
+type hostOpts struct {
+	success     bool
+	timeout     time.Duration
+	currentTerm int
 }
 
-func NewMockNode(success bool) *MockNode {
+type MockNode struct {
+	mu    sync.Mutex
+	Opts  hostOpts
+	Calls map[string]int
+}
+
+func NewMockNode(options hostOpts) *MockNode {
 	return &MockNode{
-		mu:      sync.Mutex{},
-		Success: success,
-		Calls:   make(map[string]int),
+		mu:    sync.Mutex{},
+		Opts:  options,
+		Calls: make(map[string]int),
 	}
 }
 
@@ -44,9 +51,26 @@ func (n *MockNode) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func (n *MockNode) requestVote(w http.ResponseWriter, r *http.Request) {
+	requestBody, err := io.ReadAll(r.Body)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	request := &RequestVoteRequest{}
+	if err := request.Unmarshal(requestBody); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	voteGranted := true
+	if !n.Opts.success || request.Term < n.Opts.currentTerm {
+		voteGranted = false
+	}
+
 	response := &RequestVoteResponse{
 		Term:        1,
-		VoteGranted: n.Success,
+		VoteGranted: voteGranted,
 	}
 
 	responseBody, err := response.Marshal()
@@ -70,18 +94,18 @@ func NewSuite(t *testing.T) *Suite {
 	return &Suite{T: t}
 }
 
-func (s *Suite) Setup(hosts map[string]bool, callHosts map[string]string) error {
+func (s *Suite) Setup(hosts map[string]hostOpts, callHosts map[string]string) error {
 	logging.SetLogger(log.New(os.Stdout, "TEST ", log.Ldate|log.Ltime|log.Lmicroseconds|log.Lshortfile))
 
 	s.Daemon = &Node{
-		term:   1,
-		state:  Follower,
-		errors: make(chan error),
+		currentTerm: 1,
+		state:       Follower,
+		errors:      make(chan error),
 	}
 
 	s.Servers = make(map[string]*http.Server)
 
-	for host, success := range hosts {
+	for host, options := range hosts {
 		u, err := url.Parse(host)
 		if err != nil {
 			return fmt.Errorf("error parsing hostname: %v", err)
@@ -89,7 +113,7 @@ func (s *Suite) Setup(hosts map[string]bool, callHosts map[string]string) error 
 		uu := fmt.Sprintf("%s:%s", u.Hostname(), u.Port())
 		s.Servers[uu] = &http.Server{
 			Addr:    uu,
-			Handler: NewMockNode(success),
+			Handler: NewMockNode(options),
 		}
 
 		if callHost, ok := callHosts[host]; ok {
@@ -126,7 +150,7 @@ func (s *Suite) TearDown() {
 func TestElection(t *testing.T) {
 	tests := []struct {
 		label            string
-		hosts            map[string]bool
+		hosts            map[string]hostOpts
 		callHosts        map[string]string
 		callExpectations map[string]map[string]int
 		expectedErrors   []error
@@ -134,9 +158,13 @@ func TestElection(t *testing.T) {
 	}{
 		{
 			label: "elected",
-			hosts: map[string]bool{
-				"http://localhost:63000": true,
-				"http://localhost:63001": true,
+			hosts: map[string]hostOpts{
+				"http://localhost:63000": {
+					success: true,
+				},
+				"http://localhost:63001": {
+					success: true,
+				},
 			},
 			callExpectations: map[string]map[string]int{
 				"http://localhost:63000": {
@@ -152,9 +180,13 @@ func TestElection(t *testing.T) {
 		},
 		{
 			label: "not_elected",
-			hosts: map[string]bool{
-				"http://localhost:63000": false,
-				"http://localhost:63001": false,
+			hosts: map[string]hostOpts{
+				"http://localhost:63000": {
+					success: false,
+				},
+				"http://localhost:63001": {
+					success: false,
+				},
 			},
 			callExpectations: map[string]map[string]int{
 				"http://localhost:63000": {
@@ -168,9 +200,13 @@ func TestElection(t *testing.T) {
 		},
 		{
 			label: "errors",
-			hosts: map[string]bool{
-				"http://localhost:63000": false,
-				"http://localhost:63001": false,
+			hosts: map[string]hostOpts{
+				"http://localhost:63000": {
+					success: false,
+				},
+				"http://localhost:63001": {
+					success: false,
+				},
 			},
 			callHosts: map[string]string{
 				"http://localhost:63000": "http://localhost:63005",
@@ -181,6 +217,23 @@ func TestElection(t *testing.T) {
 			expectedErrors: []error{
 				fmt.Errorf(`ELECTION: [localhost:63006] Error getting vote: post: Post "http://localhost:63006/RequestVote": dial tcp [::1]:63006: connect: connection refused`),
 				fmt.Errorf(`ELECTION: [localhost:63005] Error getting vote: post: Post "http://localhost:63005/RequestVote": dial tcp [::1]:63005: connect: connection refused`),
+			},
+		},
+		{
+			label: "reject_lower_term",
+			hosts: map[string]hostOpts{
+				"http://localhost:63000": {
+					success:     true,
+					currentTerm: 2,
+				},
+				"http://localhost:63001": {
+					success: true,
+				},
+			},
+			callExpectations: map[string]map[string]int{},
+			newState:         Leader,
+			expectedErrors: []error{
+				fmt.Errorf("ELECTION: [localhost:63000] Error getting vote: vote not granted"),
 			},
 		},
 	}
@@ -194,13 +247,13 @@ func TestElection(t *testing.T) {
 				t.Fatalf("error setting up suite: %v", err)
 			}
 
-			if expected, actual := tt.newState, suite.Daemon.state; expected != actual {
-				suite.T.Logf("FAIL: Expected node state %s, got %s", expected, actual)
-			}
-
 			start := time.Now()
 			logging.GetLogger().Printf("TEST: Starting election at %s", start.Format(time.RFC1123))
 			suite.Daemon.Election()
+
+			if expected, actual := tt.newState, suite.Daemon.state; expected != actual {
+				suite.T.Fatalf("FAIL: Expected node state %s, got %s", expected, actual)
+			}
 
 			for _, conn := range suite.Daemon.registry {
 				if conn.lastSeen == nil && tt.newState == Leader {
@@ -229,6 +282,8 @@ func TestElection(t *testing.T) {
 					}
 				}
 
+				logging.GetLogger().Printf("%+v", suite.Errors)
+
 				for _, expected := range tt.expectedErrors {
 					found := false
 					for _, actual := range suite.Errors {
@@ -238,12 +293,105 @@ func TestElection(t *testing.T) {
 					}
 
 					if !found {
-						suite.T.Logf("FAIL: Expected error %s but never received it.", expected.Error())
+						suite.T.Fatalf("FAIL: Expected error %s but never received it.", expected.Error())
 					}
 				}
 			}
 
 			suite.T.Log("PASS")
+		}
+
+		t.Run(tt.label, tf)
+	}
+}
+
+func TestVote(t *testing.T) {
+	tests := []struct {
+		label            string
+		request          *RequestVoteRequest
+		daemonTerm       int
+		daemonState      NodeState
+		daemonID         string
+		votedFor         string
+		expectedResult   error
+		expectedVotedFor string
+	}{
+		{
+			label:            "successful_vote",
+			request:          &RequestVoteRequest{Term: 2, CandidateID: "node_1"},
+			daemonTerm:       1,
+			daemonState:      Follower,
+			daemonID:         "node_0",
+			votedFor:         "",
+			expectedResult:   nil,
+			expectedVotedFor: "node_1",
+		},
+		{
+			label:            "outdated_term",
+			request:          &RequestVoteRequest{Term: 1, CandidateID: "node_1"},
+			daemonTerm:       2,
+			daemonState:      Follower,
+			daemonID:         "node_0",
+			votedFor:         "",
+			expectedResult:   ErrTermOutdated,
+			expectedVotedFor: "",
+		},
+		{
+			label:            "follower_already_voted",
+			request:          &RequestVoteRequest{Term: 2, CandidateID: "node_1"},
+			daemonTerm:       1,
+			daemonState:      Follower,
+			daemonID:         "node_0",
+			votedFor:         "node_2",
+			expectedResult:   ErrAlreadyVoted,
+			expectedVotedFor: "node_2",
+		},
+		{
+			label:            "candidate_already_voted",
+			request:          &RequestVoteRequest{Term: 2, CandidateID: "node_1"},
+			daemonTerm:       1,
+			daemonState:      Candidate,
+			daemonID:         "node_0",
+			votedFor:         "node_2",
+			expectedResult:   ErrAlreadyVoted,
+			expectedVotedFor: "node_2",
+		},
+		{
+			label:            "leader_cant_vote",
+			request:          &RequestVoteRequest{Term: 2, CandidateID: "node_1"},
+			daemonTerm:       1,
+			daemonState:      Leader,
+			daemonID:         "node_0",
+			votedFor:         "",
+			expectedResult:   ErrLeaderCantVote,
+			expectedVotedFor: "",
+		},
+	}
+
+	for _, tt := range tests {
+		tf := func(t *testing.T) {
+			d := &Node{
+				currentTerm: tt.daemonTerm,
+				votedFor:    tt.votedFor,
+				state:       tt.daemonState,
+			}
+
+			err := d.Vote(tt.request)
+			if tt.expectedResult != nil {
+				if err == nil {
+					t.Fatalf("FAIL: Expected error %s, got no error", tt.expectedResult.Error())
+				}
+
+				if err.Error() != tt.expectedResult.Error() {
+					t.Fatalf("FAIL: Expected error %s, got %s", tt.expectedResult.Error(), err.Error())
+				}
+			} else if err != nil {
+				t.Fatalf("FAIL: Expected no errors, got %s", err.Error())
+			}
+
+			if expected, actual := tt.expectedVotedFor, d.votedFor; expected != actual {
+				t.Fatalf("FAIL: Expected node to vote for %s, voted for %s", expected, actual)
+			}
 		}
 
 		t.Run(tt.label, tf)

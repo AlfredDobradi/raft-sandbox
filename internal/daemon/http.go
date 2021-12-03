@@ -46,19 +46,20 @@ func (n *Node) handleRequestVote(w http.ResponseWriter, r *http.Request) {
 	logging.GetLogger().Printf("Request: %+v", request)
 
 	voteGranted := false
-	if err := n.Vote(request.CandidateID); err != nil {
-		statusCode := http.StatusInternalServerError
-		if err == ErrAlreadyVoted {
-			statusCode = http.StatusConflict
+	if err := n.Vote(request); err != nil {
+		switch err {
+		case ErrAlreadyVoted, ErrTermOutdated:
+			http.Error(w, err.Error(), http.StatusConflict)
+		default:
+			http.Error(w, err.Error(), http.StatusInternalServerError)
 		}
-		http.Error(w, err.Error(), statusCode)
 		return
 	} else if err == nil {
 		voteGranted = true
 	}
 
 	response := &RequestVoteResponse{
-		Term:        n.term,
+		Term:        n.currentTerm,
 		VoteGranted: voteGranted,
 	}
 
@@ -90,7 +91,7 @@ func (n *Node) handleAppendEntry(w http.ResponseWriter, r *http.Request) {
 	n.HandleHeartbeat(request)
 
 	response := &AppendEntryResponse{
-		Term:    n.term,
+		Term:    n.currentTerm,
 		Success: true,
 	}
 
