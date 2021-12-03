@@ -38,7 +38,8 @@ services:
         "start",
         "--debug",
         "--nodes=http://raft_2:31337,http://raft_3:31337,http://raft_1:31337,\
-          http://raft_5:31337"
+          http://raft_5:31337",
+        "--node-id=raft_4"
       ]
   raft_5:
     image: axdx/raft:0.1
@@ -47,5 +48,6 @@ services:
         "start",
         "--debug",
         "--nodes=http://raft_2:31337,http://raft_3:31337,http://raft_4:31337,\
-          http://raft_1:31337"
+          http://raft_1:31337",
+        "--node-id=raft_5"
       ]

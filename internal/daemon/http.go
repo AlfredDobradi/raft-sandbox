@@ -1,7 +1,6 @@
 package daemon
 
 import (
-	"encoding/json"
 	"fmt"
 	"io/ioutil"
 	"log"
@@ -38,8 +37,8 @@ func (n *Node) handleRequestVote(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 	}
 
-	var request RequestVoteRequest
-	if err := json.Unmarshal(body, &request); err != nil {
+	request := &RequestVoteRequest{}
+	if err := request.Unmarshal(body); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -47,31 +46,60 @@ func (n *Node) handleRequestVote(w http.ResponseWriter, r *http.Request) {
 	logging.GetLogger().Printf("Request: %+v", request)
 
 	voteGranted := false
-	if err := n.Vote(request.CandidateID); err != nil && err != ErrAlreadyVoted {
-		http.Error(w, err.Error(), http.StatusConflict)
+	if err := n.Vote(request.CandidateID); err != nil {
+		statusCode := http.StatusInternalServerError
+		if err == ErrAlreadyVoted {
+			statusCode = http.StatusConflict
+		}
+		http.Error(w, err.Error(), statusCode)
 		return
 	} else if err == nil {
 		voteGranted = true
 	}
 
-	response := RequestVoteResponse{
+	response := &RequestVoteResponse{
 		Term:        n.term,
 		VoteGranted: voteGranted,
 	}
 
 	logging.GetLogger().Printf("Response: %+v", response)
 
-	responseBody, err := json.Marshal(response)
+	responseBody, err := response.Marshal()
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
+	w.Header().Set("Content-Type", "application/json")
 	w.Write(responseBody) // nolint
 }
 
 // TODO proper request and response
 func (n *Node) handleAppendEntry(w http.ResponseWriter, r *http.Request) {
-	n.HandleHeartbeat()
-	w.Write([]byte("append_entry")) // nolint
+	body, err := ioutil.ReadAll(r.Body)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+	}
+
+	request := &AppendEntryRequest{}
+	if err := request.Unmarshal(body); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	n.HandleHeartbeat(request)
+
+	response := &AppendEntryResponse{
+		Term:    n.term,
+		Success: true,
+	}
+
+	responseBody, err := response.Marshal()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.Write(responseBody) // nolint
 }

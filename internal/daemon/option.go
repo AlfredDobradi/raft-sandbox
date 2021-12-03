@@ -5,6 +5,8 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+
+	"gitlab.com/axdx/raft-sandbox/internal/logging"
 )
 
 type NodeOpt func(*Node) error
@@ -29,23 +31,29 @@ func WithPort(port string) NodeOpt {
 }
 
 func WithNodeList(potentialNodes []string) NodeOpt {
-	nodes := make([]*url.URL, 0)
+	nodes := make([]Connection, 0)
 	errorNodes := make([]string, 0)
 
 	for _, potential := range potentialNodes {
 		if node, err := url.Parse(potential); err != nil {
 			errorNodes = append(errorNodes, potential)
 		} else {
-			nodes = append(nodes, node)
+			c := Connection{
+				url:      node,
+				lastSeen: nil,
+			}
+			nodes = append(nodes, c)
 		}
 	}
+
+	logging.GetLogger().Printf("Nodes: %+v", nodes)
 
 	return func(n *Node) error {
 		if len(errorNodes) > 0 {
 			return fmt.Errorf("error parsing node IDs: %s", strings.Join(errorNodes, ", "))
 		}
 
-		n.nodes = nodes
+		n.registry = nodes
 		return nil
 	}
 }

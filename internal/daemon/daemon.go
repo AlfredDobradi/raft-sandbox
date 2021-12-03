@@ -13,6 +13,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/google/uuid"
 	"gitlab.com/axdx/raft-sandbox/internal/logging"
 )
 
@@ -25,7 +26,7 @@ const (
 )
 
 const (
-	HeartbeatTimer int64 = 300
+	HeartbeatTimer int64 = 1000
 	// TermLengthMin     int64 = 150
 	// TermLengthMax     int64 = 500
 	TermLengthMin int64 = 7000
@@ -40,7 +41,7 @@ type Node struct {
 	id       string
 	hostname string
 	port     string
-	nodes    []*url.URL
+	registry []Connection
 	listener *http.Server
 
 	heartbeat       bool
@@ -53,16 +54,26 @@ type Node struct {
 	votedFor        string
 }
 
+type Connection struct {
+	url      *url.URL
+	lastSeen *time.Time
+}
+
 func New(opts ...NodeOpt) (*Node, error) {
 	node := &Node{
 		stop:            make(chan struct{}),
 		heartbeatTicker: time.NewTicker(time.Duration(HeartbeatTimer) * time.Millisecond),
+		registry:        make([]Connection, 0),
 	}
 
 	for _, fn := range opts {
 		if err := fn(node); err != nil {
 			return nil, err
 		}
+	}
+
+	if node.id == "" {
+		node.id = uuid.New().String()
 	}
 
 	return node, nil
@@ -96,24 +107,26 @@ func (n *Node) Election() {
 	var votes int64 = 1
 
 	wg := &sync.WaitGroup{}
-	for _, node := range n.nodes {
+	for i := range n.registry {
 		wg.Add(1)
-		go func(node *url.URL) {
+		go func(node *Connection) {
 			defer wg.Done()
-			nodeHost := fmt.Sprintf("%s:%s", node.Hostname(), node.Port())
+			nodeHost := fmt.Sprintf("%s:%s", node.url.Hostname(), node.url.Port())
 			if err := n.RequestVote(nodeHost); err != nil {
-				logging.GetLogger().Printf("ELECTION: [%s] Error getting vote: %v", nodeHost, err)
+				e := fmt.Errorf("ELECTION: [%s] Error getting vote: %w", nodeHost, err)
+				n.errors <- e
+				logging.GetLogger().Println(e.Error())
 				return
 			}
 
 			logging.GetLogger().Printf("ELECTION: [%s] Received vote", nodeHost)
 			atomic.AddInt64(&votes, 1)
-		}(node)
+		}(&n.registry[i])
 	}
 	wg.Wait()
-	logging.GetLogger().Printf("Term: %d, Votes: %d", n.term, votes)
+	logging.GetLogger().Printf("ELECTION: Term: %d, Votes: %d", n.term, votes)
 
-	if votes > int64(len(n.nodes)/2) {
+	if votes > int64(len(n.registry)/2) {
 		n.setState(Leader)
 		n.Heartbeat()
 	} else {
@@ -137,6 +150,8 @@ func (n *Node) RequestVote(host string) error {
 	r, err := http.Post(fmt.Sprintf("http://%s/RequestVote", host), "application/json", body)
 	if err != nil {
 		return fmt.Errorf("post: %w", err)
+	} else if r.StatusCode != http.StatusOK {
+		return fmt.Errorf("post: %s", r.Status)
 	}
 
 	responseBody, err := ioutil.ReadAll(r.Body)
@@ -146,7 +161,7 @@ func (n *Node) RequestVote(host string) error {
 
 	var response RequestVoteResponse
 	if err := json.Unmarshal(responseBody, &response); err != nil {
-		return fmt.Errorf("unmarshal: %v", err)
+		return fmt.Errorf("unmarshal: %v, raw body: %v", err, responseBody)
 	}
 
 	if !response.VoteGranted {
@@ -157,7 +172,7 @@ func (n *Node) RequestVote(host string) error {
 }
 
 func (n *Node) Loop() {
-	logging.GetLogger().Println("Starting daemon...")
+	logging.GetLogger().Printf("Starting daemon. Node ID: %s", n.id)
 	go n.Listen()
 	n.NewTerm()
 	running := true
@@ -178,19 +193,11 @@ func (n *Node) Loop() {
 func (n *Node) Heartbeat() {
 	if n.state == Leader {
 		wg := &sync.WaitGroup{}
-		for _, node := range n.nodes {
+		for i := range n.registry {
 			wg.Add(1)
-			go func(node *url.URL) {
-				defer wg.Done()
 
-				nodeHost := fmt.Sprintf("%s:%s", node.Hostname(), node.Port())
-				_, err := http.Post(fmt.Sprintf("http://%s/AppendEntry", nodeHost), "application/json", nil)
-				if err != nil {
-					logging.GetLogger().Printf("HEARTBEAT: [%s] Error sending heartbeat: %v", nodeHost, err)
-				} else {
-					logging.GetLogger().Printf("HEARTBEAT: [%s] Heartbeat sent", nodeHost)
-				}
-			}(node)
+			node := &n.registry[i]
+			go n.sendHeartbeat(node, wg)
 		}
 		wg.Wait()
 	}
@@ -205,15 +212,51 @@ func (n *Node) Vote(nodeID string) error {
 	return nil
 }
 
-func (n *Node) HandleHeartbeat() {
-	logging.GetLogger().Printf("HEARTBEAT: Received")
+func (n *Node) HandleHeartbeat(r *AppendEntryRequest) {
+	logging.GetLogger().Printf("HEARTBEAT: [%s] Received", r.LeaderID)
 	n.heartbeat = true
 	n.setState(Follower)
 }
 
+func (n *Node) sendHeartbeat(node *Connection, wg *sync.WaitGroup) {
+	defer wg.Done()
+
+	nodeHost := fmt.Sprintf("%s:%s", node.url.Hostname(), node.url.Port())
+
+	request := &AppendEntryRequest{
+		Term:     n.term,
+		LeaderID: n.id,
+	}
+
+	body, err := request.Marshal()
+	if err != nil {
+		logging.GetLogger().Printf("HEARTBEAT: [%s] Error sending heartbeat: %v", nodeHost, err)
+		return
+	}
+
+	bodyReader := bytes.NewReader(body)
+	response, err := http.Post(fmt.Sprintf("http://%s/AppendEntry", nodeHost), "application/json", bodyReader)
+	if err != nil {
+		logging.GetLogger().Printf("HEARTBEAT: [%s] Error sending heartbeat: %v", nodeHost, err)
+		return
+	} else if response.StatusCode != http.StatusOK {
+		logging.GetLogger().Printf("HEARTBEAT: [%s] Error sending heartbeat: %s", nodeHost, response.Status)
+		return
+	}
+
+	node.lastSeen = now()
+
+	logging.GetLogger().Printf("HEARTBEAT: [%s] Heartbeat sent", nodeHost)
+}
+
 func (n *Node) setState(state NodeState) {
 	if n.state != state {
-		logging.GetLogger().Printf("New state: %s", state)
+		logging.GetLogger().Printf("STATE: New state: %s", state)
 		n.state = state
 	}
+}
+
+func now() *time.Time {
+	t := time.Now()
+	return &t
 }

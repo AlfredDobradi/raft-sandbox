@@ -14,3 +14,8 @@ func GetLogger() *log.Logger {
 
 	return logger
 }
+
+// SetLogger sets the logger facilities (mainly for testing)
+func SetLogger(newLogger *log.Logger) {
+	logger = newLogger
+}
