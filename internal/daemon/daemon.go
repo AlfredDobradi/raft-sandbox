@@ -98,7 +98,7 @@ func (n *Node) NewTerm() {
 
 	logging.GetLogger().Printf("Starting term %d, duration: %s", n.currentTerm, termDuration)
 	n.termTimer = time.NewTimer(termDuration)
-	if !n.heartbeat && n.votedFor == "" {
+	if n.state == Follower && !n.heartbeat && n.votedFor == "" {
 		n.currentTerm += 1
 
 		n.Election()
@@ -229,10 +229,15 @@ func (n *Node) Vote(request *RequestVoteRequest) error {
 	return nil
 }
 
-func (n *Node) HandleHeartbeat(r *AppendEntryRequest) {
+func (n *Node) HandleHeartbeat(r *AppendEntryRequest) error {
 	logging.GetLogger().Printf("HEARTBEAT: [%s] Received", r.LeaderID)
+	if n.currentTerm < r.Term {
+		return ErrTermOutdated
+	}
 	n.heartbeat = true
+	n.currentTerm = r.Term
 	n.setState(Follower)
+	return nil
 }
 
 func (n *Node) sendHeartbeat(node *Connection, wg *sync.WaitGroup) {

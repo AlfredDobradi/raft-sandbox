@@ -88,7 +88,10 @@ func (n *Node) handleAppendEntry(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	n.HandleHeartbeat(request)
+	if err := n.HandleHeartbeat(request); err != nil {
+		http.Error(w, err.Error(), http.StatusConflict)
+		return
+	}
 
 	response := &AppendEntryResponse{
 		Term:    n.currentTerm,
