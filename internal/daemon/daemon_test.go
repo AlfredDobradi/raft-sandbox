@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -61,6 +62,10 @@ func (n *MockNode) requestVote(w http.ResponseWriter, r *http.Request) {
 	if err := request.Unmarshal(requestBody); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
+	}
+
+	if n.Opts.timeout > 0 {
+		time.Sleep(n.Opts.timeout)
 	}
 
 	voteGranted := true
@@ -153,7 +158,7 @@ func TestElection(t *testing.T) {
 		hosts            map[string]hostOpts
 		callHosts        map[string]string
 		callExpectations map[string]map[string]int
-		expectedErrors   []error
+		expectedErrors   []string
 		newState         NodeState
 	}{
 		{
@@ -214,9 +219,9 @@ func TestElection(t *testing.T) {
 			},
 			callExpectations: map[string]map[string]int{},
 			newState:         Follower,
-			expectedErrors: []error{
-				fmt.Errorf(`ELECTION: [localhost:63006] Error getting vote: post: Post "http://localhost:63006/RequestVote": dial tcp [::1]:63006: connect: connection refused`),
-				fmt.Errorf(`ELECTION: [localhost:63005] Error getting vote: post: Post "http://localhost:63005/RequestVote": dial tcp [::1]:63005: connect: connection refused`),
+			expectedErrors: []string{
+				`Error getting vote: post: Post "http://localhost:63006/RequestVote": dial tcp [::1]:63006: connect: connection refused`,
+				`Error getting vote: post: Post "http://localhost:63005/RequestVote": dial tcp [::1]:63005: connect: connection refused`,
 			},
 		},
 		{
@@ -232,14 +237,32 @@ func TestElection(t *testing.T) {
 			},
 			callExpectations: map[string]map[string]int{},
 			newState:         Leader,
-			expectedErrors: []error{
-				fmt.Errorf("ELECTION: [localhost:63000] Error getting vote: vote not granted"),
+			expectedErrors: []string{
+				"Error getting vote: vote not granted",
+			},
+		},
+		{
+			label: "election_timeout",
+			hosts: map[string]hostOpts{
+				"http://localhost:63000": {
+					success: true,
+					timeout: 2 * time.Second,
+				},
+				"http://localhost:63001": {
+					success: true,
+					timeout: 2 * time.Second,
+				},
+			},
+			callExpectations: map[string]map[string]int{},
+			newState:         Follower,
+			expectedErrors: []string{
+				`Error getting vote: post: Post "http://localhost:63000/RequestVote": context deadline exceeded`,
+				`Error getting vote: post: Post "http://localhost:63001/RequestVote": context deadline exceeded`,
 			},
 		},
 	}
 
-	for i, tt := range tests {
-		t.Logf("Test %d - %s", i+1, tt.label)
+	for _, tt := range tests {
 		tf := func(t *testing.T) {
 			suite := NewSuite(t)
 			defer suite.TearDown()
@@ -249,7 +272,12 @@ func TestElection(t *testing.T) {
 
 			start := time.Now()
 			logging.GetLogger().Printf("TEST: Starting election at %s", start.Format(time.RFC1123))
-			suite.Daemon.Election()
+			ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
+			if err := suite.Daemon.Election(ctx, 1*time.Second); err != nil {
+				cancel()
+				suite.T.Fatalf("ERROR: %v", err)
+			}
+			cancel()
 
 			if expected, actual := tt.newState, suite.Daemon.state; expected != actual {
 				suite.T.Fatalf("FAIL: Expected node state %s, got %s", expected, actual)
@@ -287,13 +315,13 @@ func TestElection(t *testing.T) {
 				for _, expected := range tt.expectedErrors {
 					found := false
 					for _, actual := range suite.Errors {
-						if expected.Error() == actual.Error() {
+						if strings.Contains(actual.Error(), expected) {
 							found = true
 						}
 					}
 
 					if !found {
-						suite.T.Fatalf("FAIL: Expected error %s but never received it.", expected.Error())
+						suite.T.Fatalf("FAIL: Expected error %s but never received it.", expected)
 					}
 				}
 			}

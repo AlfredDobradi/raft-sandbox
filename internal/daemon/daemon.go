@@ -40,6 +40,7 @@ var ErrVoteNotGranted error = fmt.Errorf("vote not granted")
 var ErrTermOutdated error = fmt.Errorf("term is out of date")
 var ErrLeaderCantVote error = fmt.Errorf("leader requested to vote")
 var ErrAlreadyVoted error = fmt.Errorf("already voted")
+var ErrElectionTimeout error = fmt.Errorf("election timed out")
 
 type Node struct {
 	id       string
@@ -101,22 +102,29 @@ func (n *Node) NewTerm() {
 	if n.state == Follower && !n.heartbeat && n.votedFor == "" {
 		n.currentTerm += 1
 
-		n.Election()
+		ctx, cancel := context.WithTimeout(context.Background(), termDuration)
+		defer cancel()
+		if err := n.Election(ctx, termDuration); err != nil {
+			n.errors <- err
+		}
 	}
 }
 
-func (n *Node) Election() {
+func (n *Node) Election(ctx context.Context, timeout time.Duration) error {
 	n.setState(Candidate)
 	n.votedFor = n.id
 	var votes int64 = 1
 
-	wg := &sync.WaitGroup{}
-	for i := range n.registry {
-		wg.Add(1)
-		go func(node *Connection) {
+	select {
+	case <-ctx.Done():
+		return ErrElectionTimeout
+	default:
+		wg := &sync.WaitGroup{}
+
+		fn := func(node *Connection) {
 			defer wg.Done()
 			nodeHost := fmt.Sprintf("%s:%s", node.url.Hostname(), node.url.Port())
-			if err := n.RequestVote(nodeHost); err != nil {
+			if err := n.RequestVote(ctx, timeout, nodeHost); err != nil {
 				e := fmt.Errorf("ELECTION: [%s] Error getting vote: %w", nodeHost, err)
 				n.errors <- e
 				logging.GetLogger().Println(e.Error())
@@ -125,20 +133,26 @@ func (n *Node) Election() {
 
 			logging.GetLogger().Printf("ELECTION: [%s] Received vote", nodeHost)
 			atomic.AddInt64(&votes, 1)
-		}(&n.registry[i])
-	}
-	wg.Wait()
-	logging.GetLogger().Printf("ELECTION: Term: %d, Votes: %d", n.currentTerm, votes)
+		}
 
-	if votes > int64(len(n.registry)/2) {
-		n.setState(Leader)
-		n.Heartbeat()
-	} else {
-		n.setState(Follower)
+		for i := range n.registry {
+			wg.Add(1)
+			go fn(&n.registry[i])
+		}
+		wg.Wait()
+		logging.GetLogger().Printf("ELECTION: Term: %d, Votes: %d", n.currentTerm, votes)
+
+		if votes > int64(len(n.registry)/2) {
+			n.setState(Leader)
+			n.Heartbeat()
+		} else {
+			n.setState(Follower)
+		}
+		return nil
 	}
 }
 
-func (n *Node) RequestVote(host string) error {
+func (n *Node) RequestVote(ctx context.Context, timeout time.Duration, host string) error {
 	request := RequestVoteRequest{
 		Term:        n.currentTerm,
 		CandidateID: n.id,
@@ -151,7 +165,16 @@ func (n *Node) RequestVote(host string) error {
 	}
 
 	body := bytes.NewReader(payload)
-	r, err := http.Post(fmt.Sprintf("http://%s/RequestVote", host), "application/json", body)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, fmt.Sprintf("http://%s/RequestVote", host), body)
+	if err != nil {
+		return fmt.Errorf("couldn't create request: %w", err)
+	}
+
+	client := http.Client{
+		Timeout: timeout,
+	}
+
+	r, err := client.Do(req)
 	if err != nil {
 		return fmt.Errorf("post: %w", err)
 	} else if r.StatusCode != http.StatusOK {

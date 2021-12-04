@@ -75,7 +75,6 @@ func (n *Node) handleRequestVote(w http.ResponseWriter, r *http.Request) {
 	w.Write(responseBody) // nolint
 }
 
-// TODO proper request and response
 func (n *Node) handleAppendEntry(w http.ResponseWriter, r *http.Request) {
 	body, err := ioutil.ReadAll(r.Body)
 	if err != nil {
