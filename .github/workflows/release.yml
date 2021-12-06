@@ -1,0 +1,43 @@
+name: Release workflow
+on:
+  push:
+    branches: [$default-branch]
+jobs:
+  Release-And-Tag:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@master
+      - uses: go-semantic-release/action@v1
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          dry: true
+          prepend: true
+          changelog-file: CHANGELOG.md
+          changelog-generator-opt: "emojis=true"
+      - name: Upload version file
+        uses: actions/upload-artifact@v2
+        with:
+          name: version
+          path: .version
+  Publish:
+    runs-on: ubuntu-latest
+    needs:
+      - Release-And-Tag
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v1
+        with:
+          aws-access-key-id: ${{ secrets.AWSACCESSKEYID }}
+          aws-secret-access-key: ${{ secrets.AWSACCESSKEYSECRET }}
+          aws-region: eu-west-1
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v1
+      - uses: actions/checkout@master
+      - name: Download version file
+        uses: actions/download-artifact@v2
+        with:
+          name: version
+      - run: echo "Building image for ${GITHUB_REPOSITORY}@$(cat .version)"
+      # - name: Build Docker image
+      #   run:
