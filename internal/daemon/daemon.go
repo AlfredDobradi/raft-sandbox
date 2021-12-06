@@ -29,8 +29,9 @@ const (
 	HeartbeatTimer int64 = 1000
 	// TermLengthMin     int64 = 150
 	// TermLengthMax     int64 = 500
-	TermLengthMin int64 = 7000
-	TermLengthMax int64 = 10000
+	TermLengthMin      int64 = 7000
+	TermLengthMax      int64 = 10000
+	RequestVoteRetries int   = 3
 )
 
 var rnd = rand.New(rand.NewSource(time.Now().UnixNano()))
@@ -174,9 +175,16 @@ func (n *Node) RequestVote(ctx context.Context, timeout time.Duration, host stri
 		Timeout: timeout,
 	}
 
-	r, err := client.Do(req)
-	if err != nil {
-		return fmt.Errorf("post: %w", err)
+	var r *http.Response
+	var httpErr error
+	for i := 0; i < RequestVoteRetries; i++ {
+		r, httpErr = client.Do(req)
+		if httpErr == nil {
+			break
+		}
+	}
+	if httpErr != nil {
+		return fmt.Errorf("post: %w", httpErr)
 	} else if r.StatusCode != http.StatusOK {
 		return fmt.Errorf("post: %s", r.Status)
 	}
