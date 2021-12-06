@@ -182,7 +182,8 @@ func (n *Node) RequestVote(ctx context.Context, timeout time.Duration, host stri
 		if httpErr == nil {
 			break
 		}
-		logging.GetLogger().Printf("Error sending request, retrying %d/%d", i+1, RequestVoteRetries)
+		logging.GetLogger().Printf("ELECTION: [%s] Error sending request, retrying %d/%d", host, i+1, RequestVoteRetries)
+		time.Sleep(30 * time.Millisecond)
 	}
 	if httpErr != nil {
 		return fmt.Errorf("post: %w", httpErr)
