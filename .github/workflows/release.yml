@@ -1,0 +1,16 @@
+name: Release workflow
+on:
+  push:
+    # branches: [$default-branch]
+jobs:
+  Tag-Version:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@master
+      - uses: go-semantic-release/action@v1
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          dry: true
+          prepend: true
+          changelog-file: CHANGELOG.md
+          changelog-generator-opt: "emojis=true"
