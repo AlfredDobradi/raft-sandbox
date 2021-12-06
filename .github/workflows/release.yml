@@ -7,7 +7,7 @@ on:
     types: [closed]
 jobs:
   Release-And-Tag:
-    if: ${{ github.event-name == "push" || github.event.pull_request.merged }}
+    if: ${{ github.event-name == 'push' || github.event.pull_request.merged }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@master
