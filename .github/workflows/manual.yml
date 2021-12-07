@@ -17,7 +17,7 @@ jobs:
           version: 2
           verbose: true
       - name: Login to Amazon ECR
-        run: aws ecr-public get-login-password --region na-east-1 | docker login --username AWS --password-stdin public.ecr.aws/p6a9q3e0
+        run: aws ecr-public get-login-password --region us-east-1 | docker login --username AWS --password-stdin public.ecr.aws/p6a9q3e0
         shell: bash
       # - uses: actions/checkout@master
       # - name: Download version file
@@ -27,3 +27,4 @@ jobs:
       # - run: echo "Building image for ${GITHUB_REPOSITORY}@$(cat .version)"
       # - name: Build Docker image
       #   run:
+# arn:aws:ecr-public:693337392500:repository/axdx/raft
