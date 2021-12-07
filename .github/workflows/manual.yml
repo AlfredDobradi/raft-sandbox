@@ -3,8 +3,6 @@ on: [workflow_dispatch]
 jobs:
   Publish-Dev-Version:
     runs-on: ubuntu-latest
-    needs:
-      - Release-And-Tag
     steps:
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v1
