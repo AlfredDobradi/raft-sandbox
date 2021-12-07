@@ -21,6 +21,8 @@ jobs:
         shell: bash
       - uses: actions/checkout@master
       - run: ls -la ../
+      - run: chmod -R 777 ../raft-sandbox
+      - run: ls -la ../
       - uses: AlfredDobradi/go-semantic-release-action@fb5d7b9fd1ff7983be3bd41e321787c4d791e4e5
         id: semrel
         with:
