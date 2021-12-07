@@ -48,6 +48,9 @@ func (n *MockNode) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	if r.URL.String() == "/RequestVote" && r.Method == http.MethodPost {
 		n.requestVote(w, r)
+	} else if r.URL.String() == "/Health" && r.Method == http.MethodGet {
+		w.Write([]byte("OK")) // nolint
+		return
 	}
 }
 
@@ -99,7 +102,7 @@ func NewSuite(t *testing.T) *Suite {
 	return &Suite{T: t}
 }
 
-func (s *Suite) Setup(hosts map[string]hostOpts, callHosts map[string]string) error {
+func (s *Suite) Setup(hosts map[string]hostOpts, callHosts map[string]string, wait ...bool) error {
 	logging.SetLogger(log.New(os.Stdout, "TEST ", log.Ldate|log.Ltime|log.Lmicroseconds|log.Lshortfile))
 
 	s.Daemon = &Node{
@@ -143,7 +146,48 @@ func (s *Suite) Setup(hosts map[string]hostOpts, callHosts map[string]string) er
 		}
 	}()
 
+	if len(wait) > 0 && wait[0] {
+		waitTimeout := 100 * time.Millisecond
+		retryTicker := time.NewTicker(10 * time.Millisecond)
+		ctx, cancel := context.WithTimeout(context.Background(), waitTimeout)
+		defer cancel()
+		unreachables := s.HealthCheck([]string{})
+		if len(unreachables) > 0 {
+			log.Printf("Waiting %s or until services reachable", waitTimeout)
+			for len(unreachables) > 0 {
+				select {
+				case <-retryTicker.C:
+					unreachables = s.HealthCheck(unreachables)
+				case <-ctx.Done():
+					log.Printf("Timeout: Nodes didn't become reachable in time.")
+					return fmt.Errorf("error waiting for nodes to become reachable: %s", strings.Join(unreachables, ", "))
+				}
+			}
+		}
+
+	}
+
 	return nil
+}
+
+// HealthCheck returns addresses that were unreachable
+func (s *Suite) HealthCheck(addrs []string) []string {
+	if len(addrs) == 0 {
+		for _, server := range s.Servers {
+			addrs = append(addrs, server.Addr)
+		}
+	}
+
+	result := make([]string, 0)
+	for _, addr := range addrs {
+		r, err := http.Get(fmt.Sprintf("%s/Health", addr))
+		if err == nil && r.StatusCode == 200 {
+			continue
+		}
+		result = append(result, addr)
+	}
+
+	return result
 }
 
 func (s *Suite) TearDown() {
@@ -154,15 +198,17 @@ func (s *Suite) TearDown() {
 
 func TestElection(t *testing.T) {
 	tests := []struct {
-		label            string
-		hosts            map[string]hostOpts
-		callHosts        map[string]string
-		callExpectations map[string]map[string]int
-		expectedErrors   []string
-		newState         NodeState
+		label              string
+		hosts              map[string]hostOpts
+		callHosts          map[string]string
+		callExpectations   map[string]map[string]int
+		expectedErrors     []string
+		newState           NodeState
+		waitUntilReachable bool
 	}{
 		{
-			label: "elected",
+			label:              "elected",
+			waitUntilReachable: true,
 			hosts: map[string]hostOpts{
 				"http://localhost:63000": {
 					success: true,
@@ -184,7 +230,8 @@ func TestElection(t *testing.T) {
 			newState: Leader,
 		},
 		{
-			label: "not_elected",
+			label:              "not_elected",
+			waitUntilReachable: true,
 			hosts: map[string]hostOpts{
 				"http://localhost:63000": {
 					success: false,
@@ -225,7 +272,8 @@ func TestElection(t *testing.T) {
 			},
 		},
 		{
-			label: "reject_lower_term",
+			label:              "reject_lower_term",
+			waitUntilReachable: true,
 			hosts: map[string]hostOpts{
 				"http://localhost:63000": {
 					success:     true,
@@ -242,7 +290,8 @@ func TestElection(t *testing.T) {
 			},
 		},
 		{
-			label: "election_timeout",
+			label:              "election_timeout",
+			waitUntilReachable: true,
 			hosts: map[string]hostOpts{
 				"http://localhost:63000": {
 					success: true,
