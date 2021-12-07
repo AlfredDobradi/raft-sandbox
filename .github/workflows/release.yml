@@ -10,7 +10,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@master
-      - uses: go-semantic-release/action@v1
+      - uses: AlfredDobradi/go-semantic-release-action@3800d11c6cb0b5716edda1fc44c259a87878be70
         id: semrel
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -18,7 +18,7 @@ jobs:
           changelog-file: CHANGELOG.md
           changelog-generator-opt: "emojis=true"
       - run: |
-          TAG=v${{ steps.semre.output.version }}
+          TAG=v${{ steps.semrel.output.version }}
           echo ${TAG}
       - run: ls -la
       - name: Upload version file
