@@ -10,7 +10,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@master
-      - uses: AlfredDobradi/go-semantic-release-action@a2a7c69ab953f0594e474c7f901f241db61cbf2d
+      - uses: AlfredDobradi/go-semantic-release-action@e87b72a8929b9b3a318bce1424c10f00cafb95bd
         id: semrel
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
