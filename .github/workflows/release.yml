@@ -1,13 +1,12 @@
 name: Release workflow
 on:
-  push:
-    branches: ["main"]
+  workflow_dispatch:
   pull_request:
     branches: ["main"]
     types: [closed]
 jobs:
   Release-And-Tag:
-    if: ${{ github.event_name == 'push' || github.event.pull_request.merged }}
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.pull_request.merged }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@master
@@ -16,6 +15,7 @@ jobs:
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           prepend: true
+          changelog-file: CHANGELOG.md
           changelog-generator-opt: "emojis=true"
       - run: |
           TAG=v${{ steps.semre.output.version }}
