@@ -55,4 +55,5 @@ jobs:
           echo "Building image for axdx/raft@$(cat .version)"
           docker build -t public.ecr.aws/p6a9q3e0/axdx/raft:latest .
           docker tag public.ecr.aws/p6a9q3e0/axdx/raft:latest public.ecr.aws/p6a9q3e0/axdx/raft:$(cat .version)
-          docker push public.ecr.aws/p6a9q3e0/axdx/raft:latest public.ecr.aws/p6a9q3e0/axdx/raft:$(cat .version)
+          docker push public.ecr.aws/p6a9q3e0/axdx/raft:latest
+          docker push public.ecr.aws/p6a9q3e0/axdx/raft:$(cat .version)
