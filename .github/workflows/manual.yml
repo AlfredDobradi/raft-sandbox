@@ -20,10 +20,11 @@ jobs:
         run: aws ecr-public get-login-password --region us-east-1 | docker login --username AWS --password-stdin public.ecr.aws/p6a9q3e0
         shell: bash
       - uses: actions/checkout@master
-      - uses: go-semantic-release/action@v1
+      - uses: AlfredDobradi/go-semantic-release@fb5d7b9fd1ff7983be3bd41e321787c4d791e4e5
         id: semrel
         with:
           dry: true
+          allow-no-changes: true
           github-token: ${{ secrets.GITHUB_TOKEN }}
       - run: ls -la
       - run: |
