@@ -327,6 +327,7 @@ func TestElection(t *testing.T) {
 				suite.T.Fatalf("ERROR: %v", err)
 			}
 			cancel()
+			time.Sleep(100 * time.Millisecond)
 
 			if expected, actual := tt.newState, suite.Daemon.state; expected != actual {
 				suite.T.Fatalf("FAIL: Expected node state %s, got %s", expected, actual)
