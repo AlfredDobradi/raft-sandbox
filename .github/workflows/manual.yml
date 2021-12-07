@@ -1,0 +1,29 @@
+name: Manual workflow
+on: [workflow_dispatch]
+jobs:
+  Publish-Dev-Version:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v1
+        with:
+          aws-access-key-id: ${{ secrets.AWSACCESSKEYID }}
+          aws-secret-access-key: ${{ secrets.AWSACCESSKEYSECRET }}
+          aws-region: eu-west-1
+      - name: Install AWS CLI
+        id: install-aws-cli
+        uses: unfor19/install-aws-cli-action@v1
+        with:
+          version: 2
+          verbose: true
+      - name: Login to Amazon ECR
+        run: aws ecr-public get-login-password --region eu-west-1 | docker login --username AWS --password-stdin public.ecr.aws/p6a9q3e0
+        shell: bash
+      # - uses: actions/checkout@master
+      # - name: Download version file
+      #   uses: actions/download-artifact@v2
+      #   with:
+      #     name: version
+      # - run: echo "Building image for ${GITHUB_REPOSITORY}@$(cat .version)"
+      # - name: Build Docker image
+      #   run:
