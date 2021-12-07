@@ -24,7 +24,9 @@ jobs:
         with:
           dry: true
           github-token: ${{ secrets.GITHUB_TOKEN }}
+      - run: ls -la
       - run: echo "Building image for ${GITHUB_REPOSITORY}@$(cat .version-unreleased)"
+        shell: bash
       # - name: Build Docker image
       #   run:
 # arn:aws:ecr-public:693337392500:repository/axdx/raft
