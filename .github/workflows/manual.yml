@@ -20,7 +20,7 @@ jobs:
         run: aws ecr-public get-login-password --region us-east-1 | docker login --username AWS --password-stdin public.ecr.aws/p6a9q3e0
         shell: bash
       - uses: actions/checkout@master
-      - run: chmod -R 777 .
+      - run: ls -la ../
       - uses: AlfredDobradi/go-semantic-release-action@fb5d7b9fd1ff7983be3bd41e321787c4d791e4e5
         id: semrel
         with:
