@@ -16,6 +16,7 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           prepend: true
           keep-version-file: true
+          allow-no-changes: true
           changelog-file: CHANGELOG.md
           changelog-generator-opt: "emojis=true"
       - name: Upload version file
