@@ -10,42 +10,45 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@master
-      - uses: AlfredDobradi/go-semantic-release-action@3800d11c6cb0b5716edda1fc44c259a87878be70
+      - uses: AlfredDobradi/go-semantic-release-action@35b4ba4986a53ee173fafab6d5bfefdbabba6c9b
         id: semrel
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           prepend: true
           changelog-file: CHANGELOG.md
           changelog-generator-opt: "emojis=true"
-      - run: |
-          TAG=v${{ steps.semrel.output.version }}
-          echo ${TAG}
-      - run: ls -la
       - name: Upload version file
         uses: actions/upload-artifact@v2
         with:
           name: version
           path: .version
-  # Publish:
-  #   if: ${{ github.event_name == 'push' || github.event.pull_request.merged }}
-  #   runs-on: ubuntu-latest
-  #   needs:
-  #     - Release-And-Tag
-  #   steps:
-  #     - name: Configure AWS credentials
-  #       uses: aws-actions/configure-aws-credentials@v1
-  #       with:
-  #         aws-access-key-id: ${{ secrets.AWSACCESSKEYID }}
-  #         aws-secret-access-key: ${{ secrets.AWSACCESSKEYSECRET }}
-  #         aws-region: eu-west-1
-  #     - name: Login to Amazon ECR
-  #       id: login-ecr
-  #       uses: aws-actions/amazon-ecr-login@v1
-  #     - uses: actions/checkout@master
-  #     - name: Download version file
-  #       uses: actions/download-artifact@v2
-  #       with:
-  #         name: version
-  #     - run: echo "Building image for ${GITHUB_REPOSITORY}@$(cat .version)"
+  Publish:
+    if: ${{ github.event_name == 'push' || github.event.pull_request.merged }}
+    runs-on: ubuntu-latest
+    needs:
+      - Release-And-Tag
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v1
+        with:
+          aws-access-key-id: ${{ secrets.AWSACCESSKEYID }}
+          aws-secret-access-key: ${{ secrets.AWSACCESSKEYSECRET }}
+          aws-region: us-east-1
+      - name: Install AWS CLI
+        id: install-aws-cli
+        uses: unfor19/install-aws-cli-action@v1
+        with:
+          version: 2
+          verbose: true
+      - name: Login to Amazon ECR
+        run: aws ecr-public get-login-password --region us-east-1 | docker login --username AWS --password-stdin public.ecr.aws/p6a9q3e0
+        shell: bash
+      - uses: actions/checkout@master
+      - uses: actions/checkout@master
+      - name: Download version file
+        uses: actions/download-artifact@v2
+        with:
+          name: version
+      - run: echo "Building image for ${GITHUB_REPOSITORY}@$(cat .version)"
   # - name: Build Docker image
   #   run:
