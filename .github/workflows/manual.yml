@@ -19,12 +19,12 @@ jobs:
       - name: Login to Amazon ECR
         run: aws ecr-public get-login-password --region us-east-1 | docker login --username AWS --password-stdin public.ecr.aws/p6a9q3e0
         shell: bash
-      # - uses: actions/checkout@master
-      # - name: Download version file
-      #   uses: actions/download-artifact@v2
-      #   with:
-      #     name: version
-      # - run: echo "Building image for ${GITHUB_REPOSITORY}@$(cat .version)"
+      - uses: actions/checkout@master
+      - uses: go-semantic-release/action@v1
+        with:
+          dry: true
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+      - run: echo "Building image for ${GITHUB_REPOSITORY}@$(cat .version-unreleased)"
       # - name: Build Docker image
       #   run:
 # arn:aws:ecr-public:693337392500:repository/axdx/raft
