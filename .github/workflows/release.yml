@@ -12,10 +12,14 @@ jobs:
     steps:
       - uses: actions/checkout@master
       - uses: go-semantic-release/action@v1
+        id: semrel
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           prepend: true
           changelog-generator-opt: "emojis=true"
+      - run: |
+          TAG=v${{ steps.semre.output.version }}
+          echo ${TAG}
       - run: ls -la
       - name: Upload version file
         uses: actions/upload-artifact@v2
