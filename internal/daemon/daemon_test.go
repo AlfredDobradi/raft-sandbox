@@ -279,6 +279,8 @@ func TestElection(t *testing.T) {
 			}
 			cancel()
 
+			time.Sleep(100 * time.Millisecond) // TODO: A nicer way to wait a bit for expected errors from channel
+
 			if expected, actual := tt.newState, suite.Daemon.state; expected != actual {
 				suite.T.Fatalf("FAIL: Expected node state %s, got %s", expected, actual)
 			}
