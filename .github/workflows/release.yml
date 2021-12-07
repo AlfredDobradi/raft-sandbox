@@ -15,8 +15,8 @@ jobs:
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           prepend: true
-          changelog-file: CHANGELOG.md
           changelog-generator-opt: "emojis=true"
+      - run: ls -la
       - name: Upload version file
         uses: actions/upload-artifact@v2
         with:
