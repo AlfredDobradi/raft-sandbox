@@ -22,6 +22,9 @@ linters:
     - stylecheck
     - goconst
     - gocyclo
+    - misspell
+    - godot
+    - golint
 
     # List of regexps of issue texts to exclude
 issues:

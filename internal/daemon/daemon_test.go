@@ -363,7 +363,7 @@ func TestVote(t *testing.T) {
 			daemonState:      Follower,
 			daemonID:         "node_0",
 			votedFor:         "",
-			expectedResult:   ErrTermOutdated,
+			expectedResult:   NewErrTermOutdated(1, 2),
 			expectedVotedFor: "",
 		},
 		{
@@ -373,7 +373,7 @@ func TestVote(t *testing.T) {
 			daemonState:      Follower,
 			daemonID:         "node_0",
 			votedFor:         "node_2",
-			expectedResult:   ErrAlreadyVoted,
+			expectedResult:   ErrAlreadyVoted{},
 			expectedVotedFor: "node_2",
 		},
 		{
@@ -383,7 +383,7 @@ func TestVote(t *testing.T) {
 			daemonState:      Candidate,
 			daemonID:         "node_0",
 			votedFor:         "node_2",
-			expectedResult:   ErrAlreadyVoted,
+			expectedResult:   ErrAlreadyVoted{},
 			expectedVotedFor: "node_2",
 		},
 		{
@@ -393,7 +393,7 @@ func TestVote(t *testing.T) {
 			daemonState:      Leader,
 			daemonID:         "node_0",
 			votedFor:         "",
-			expectedResult:   ErrLeaderCantVote,
+			expectedResult:   ErrLeaderCantVote{},
 			expectedVotedFor: "",
 		},
 	}

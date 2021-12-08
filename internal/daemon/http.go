@@ -47,12 +47,12 @@ func (n *Node) handleRequestVote(w http.ResponseWriter, r *http.Request) {
 
 	voteGranted := false
 	if err := n.Vote(request); err != nil {
-		switch err {
-		case ErrAlreadyVoted, ErrTermOutdated:
-			http.Error(w, err.Error(), http.StatusConflict)
-		default:
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+		statusCode := http.StatusInternalServerError
+		switch err.(type) {
+		case ErrTermOutdated, ErrAlreadyVoted:
+			statusCode = http.StatusConflict
 		}
+		http.Error(w, err.Error(), statusCode)
 		return
 	} else if err == nil {
 		voteGranted = true
