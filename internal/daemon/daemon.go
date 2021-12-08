@@ -3,10 +3,11 @@ package daemon
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
-	"math/rand"
+	"math/big"
 	"net/http"
 	"net/url"
 	"sync"
@@ -34,14 +35,14 @@ const (
 	RequestVoteRetries int   = 3
 )
 
-var rnd = rand.New(rand.NewSource(time.Now().UnixNano()))
-
 // TODO Create error types
-var ErrVoteNotGranted error = fmt.Errorf("vote not granted")
-var ErrTermOutdated error = fmt.Errorf("term is out of date")
-var ErrLeaderCantVote error = fmt.Errorf("leader requested to vote")
-var ErrAlreadyVoted error = fmt.Errorf("already voted")
-var ErrElectionTimeout error = fmt.Errorf("election timed out")
+var (
+	ErrVoteNotGranted  error = fmt.Errorf("vote not granted")
+	ErrTermOutdated    error = fmt.Errorf("term is out of date")
+	ErrLeaderCantVote  error = fmt.Errorf("leader requested to vote")
+	ErrAlreadyVoted    error = fmt.Errorf("already voted")
+	ErrElectionTimeout error = fmt.Errorf("election timed out")
+)
 
 type Node struct {
 	id       string
@@ -96,7 +97,12 @@ func (n *Node) Stop() {
 }
 
 func (n *Node) NewTerm() {
-	termDuration := time.Duration(rnd.Int63n(TermLengthMax-TermLengthMin)+TermLengthMin) * time.Millisecond
+	dur, err := getRandomDuration()
+	if err != nil {
+		n.errors <- err
+		return
+	}
+	termDuration := dur * time.Millisecond
 
 	logging.GetLogger().Printf("Starting term %d, duration: %s", n.currentTerm, termDuration)
 	n.termTimer = time.NewTimer(termDuration)
@@ -314,4 +320,21 @@ func (n *Node) setState(state NodeState) {
 func now() *time.Time {
 	t := time.Now()
 	return &t
+}
+
+func getRandomDuration() (time.Duration, error) {
+	maxTerm := big.NewInt(TermLengthMax)
+	minTerm := big.NewInt(TermLengthMin)
+
+	floor := big.NewInt(0)
+	ceiling := big.NewInt(0)
+	// rand = ceiling + (floor * -1)
+	ceiling.Add(maxTerm, floor.Mul(minTerm, big.NewInt(-1)))
+	r, err := rand.Int(rand.Reader, ceiling)
+	if err != nil {
+		return 0, err
+	}
+	dur := big.NewInt(0)
+	dur.Add(r, minTerm)
+	return time.Duration(dur.Int64()), nil
 }
