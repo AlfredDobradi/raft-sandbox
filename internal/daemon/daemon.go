@@ -27,21 +27,10 @@ const (
 )
 
 const (
-	HeartbeatTimer int64 = 1000
-	// TermLengthMin     int64 = 150
-	// TermLengthMax     int64 = 500
+	HeartbeatTimer     int64 = 1000
 	TermLengthMin      int64 = 7000
 	TermLengthMax      int64 = 10000
 	RequestVoteRetries int   = 3
-)
-
-// TODO Create error types
-var (
-	ErrVoteNotGranted  error = fmt.Errorf("vote not granted")
-	ErrTermOutdated    error = fmt.Errorf("term is out of date")
-	ErrLeaderCantVote  error = fmt.Errorf("leader requested to vote")
-	ErrAlreadyVoted    error = fmt.Errorf("already voted")
-	ErrElectionTimeout error = fmt.Errorf("election timed out")
 )
 
 type Node struct {
@@ -107,7 +96,7 @@ func (n *Node) NewTerm() {
 	logging.GetLogger().Printf("Starting term %d, duration: %s", n.currentTerm, termDuration)
 	n.termTimer = time.NewTimer(termDuration)
 	if n.state == Follower && !n.heartbeat && n.votedFor == "" {
-		n.currentTerm += 1
+		n.currentTerm++
 
 		ctx, cancel := context.WithTimeout(context.Background(), termDuration)
 		defer cancel()
@@ -124,7 +113,7 @@ func (n *Node) Election(ctx context.Context, timeout time.Duration) error {
 
 	select {
 	case <-ctx.Done():
-		return ErrElectionTimeout
+		return ErrElectionTimeout{}
 	default:
 		wg := &sync.WaitGroup{}
 
@@ -208,7 +197,7 @@ func (n *Node) RequestVote(ctx context.Context, timeout time.Duration, host stri
 	}
 
 	if !response.VoteGranted {
-		return ErrVoteNotGranted
+		return ErrVoteNotGranted{}
 	}
 
 	return nil
@@ -250,18 +239,18 @@ func (n *Node) Vote(request *RequestVoteRequest) error {
 	switch n.state {
 	case Follower:
 		if n.votedFor != "" {
-			return ErrAlreadyVoted
+			return ErrAlreadyVoted{}
 		}
 	case Candidate:
 		if n.votedFor != "" && n.votedFor != n.id {
-			return ErrAlreadyVoted
+			return ErrAlreadyVoted{}
 		}
 	case Leader:
-		return ErrLeaderCantVote
+		return ErrLeaderCantVote{}
 	}
 
 	if request.Term < n.currentTerm {
-		return ErrTermOutdated
+		return NewErrTermOutdated(request.Term, n.currentTerm)
 	}
 
 	n.votedFor = request.CandidateID
@@ -270,8 +259,8 @@ func (n *Node) Vote(request *RequestVoteRequest) error {
 
 func (n *Node) HandleHeartbeat(r *AppendEntryRequest) error {
 	logging.GetLogger().Printf("HEARTBEAT: [%s] Received", r.LeaderID)
-	if n.currentTerm < r.Term {
-		return ErrTermOutdated
+	if r.Term < n.currentTerm {
+		return NewErrTermOutdated(r.Term, n.currentTerm)
 	}
 	n.heartbeat = true
 	n.currentTerm = r.Term

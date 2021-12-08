@@ -11,7 +11,7 @@ import (
 )
 
 type StartCmd struct {
-	NodeID   string   `help:"The unique identifer of the node"`
+	NodeID   string   `help:"The unique identifier of the node"`
 	Hostname string   `help:"Hostname to bind service to" default:"0.0.0.0"`
 	Port     string   `help:"Port to listen on" default:"31337"`
 	Nodes    []string `help:"Address of the nodes in the cluster"`
