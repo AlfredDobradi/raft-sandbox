@@ -6,7 +6,7 @@ import (
 	"crypto/rand"
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"math/big"
 	"net/http"
 	"net/url"
@@ -197,7 +197,7 @@ func (n *Node) RequestVote(ctx context.Context, timeout time.Duration, host stri
 		return fmt.Errorf("post: %s", r.Status)
 	}
 
-	responseBody, err := ioutil.ReadAll(r.Body)
+	responseBody, err := io.ReadAll(r.Body)
 	if err != nil {
 		return fmt.Errorf("body: %v", err)
 	}
