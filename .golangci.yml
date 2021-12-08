@@ -15,13 +15,13 @@ linter-settings:
 # enable or disable specific linters
 linters:
   enable:
+    - interfacer
     - govet
     - gosec
     - nakedret
     - stylecheck
     - goconst
     - gocyclo
-    - maligned
 
     # List of regexps of issue texts to exclude
 issues:
